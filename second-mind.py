@@ -22,7 +22,7 @@ DEFAULT_PORTS = {"SSH": "22", "Telnet": "23"}
 class SecondMindApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Second Mind | Device Manager")
+        self.title("Second Mind")
         self.geometry("1180x760")
         self.minsize(760, 520)
 

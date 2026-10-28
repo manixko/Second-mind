@@ -1,0 +1,2 @@
+customtkinter>=5.2.2
+paramiko>=3.4.0
