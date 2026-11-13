@@ -13,6 +13,11 @@ try:
 except ImportError:
     import utils.Connection as connection
 
+try:
+    from utils.config_manager import ConfigManager
+except ImportError:
+    from config_manager import ConfigManager
+
 ctk.set_default_color_theme("blue")
 ctk.set_appearance_mode("dark")
 
@@ -48,7 +53,8 @@ class SecondMindApp(ctk.CTk):
             self.container, self.start_connect, self.toggle_theme
         )
         self.workspace_view = WorkspaceView(
-            self.container, self.run_command, self.disconnect, self.toggle_theme
+            self.container, self.run_command, self.disconnect,
+            self.toggle_theme, self.execute_config
         )
         self.connection_view.grid(row=0, column=0, sticky="nsew")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -111,6 +117,26 @@ class SecondMindApp(ctk.CTk):
             target=self._command_worker, args=(command,), daemon=True
         ).start()
 
+    def execute_config(self, commands):
+        if not self.client or self.busy or not commands:
+            return
+        self.busy = True
+        self.workspace_view.set_busy(True)
+        threading.Thread(
+            target=self._config_worker, args=(list(commands),), daemon=True
+        ).start()
+
+    def _config_worker(self, commands):
+        results = []
+        for command in commands:
+            try:
+                output = self.client.command(command)
+                results.append((command, output or "(No output returned)"))
+            except Exception as exc:
+                results.append((command, f"Command error: {exc}"))
+                break
+        self.events.put(("config_result", results))
+
     def _command_worker(self, command):
         try:
             output = self.client.command(command)
@@ -149,6 +175,11 @@ class SecondMindApp(ctk.CTk):
                     self.busy = False
                     self.workspace_view.set_busy(False)
                     self.workspace_view.append_result(*payload)
+                elif kind == "config_result":
+                    self.busy = False
+                    self.workspace_view.set_busy(False)
+                    for command, output in payload:
+                        self.workspace_view.append_result(command, output)
         except queue.Empty:
             pass
         self.after(80, self.poll_events)
@@ -304,10 +335,15 @@ class ConnectionView(ctk.CTkFrame):
 class WorkspaceView(ctk.CTkFrame):
     """Three-column workspace. The center navigation and right panel are placeholders for now."""
 
-    def __init__(self, master, on_command, on_disconnect, toggle_theme):
+    def __init__(self, master, on_command, on_disconnect, toggle_theme, on_execute_config):
         super().__init__(master, corner_radius=0)
         self.on_command = on_command
         self.on_disconnect = on_disconnect
+        self.on_execute_config = on_execute_config
+        self.config_manager = ConfigManager()
+        self.current_vendor = ""
+        self.selected_config = None
+        self.input_widgets = {}
 
         # Main layout: device sidebar | dynamic option list | selected option panel
         self.grid_rowconfigure(0, weight=1)
@@ -374,7 +410,7 @@ class WorkspaceView(ctk.CTkFrame):
         self.options_list.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 10))
         self.empty_options = ctk.CTkLabel(
             self.options_list,
-            text="Device-specific options\nwill appear here later.",
+            text="Connect to a supported device\nto load its configurations.",
             justify="left", anchor="w", wraplength=175,
             text_color=("#687386", "#8995A8")
         )
@@ -406,13 +442,30 @@ class WorkspaceView(ctk.CTkFrame):
             font=ctk.CTkFont(size=25, weight="bold"), anchor="w"
         )
         self.config_title.grid(row=1, column=0, sticky="ew", pady=(0, 8))
-        self.config_description = ctk.CTkLabel(
-            self.config_panel,
-            text="Select a device tool from the middle panel.\nIts settings and controls will be displayed here.",
-            text_color=("#687386", "#8995A8"), justify="left", anchor="nw",
-            font=ctk.CTkFont(size=13)
+        self.form_area = ctk.CTkScrollableFrame(
+            self.config_panel, fg_color="transparent", corner_radius=0
         )
-        self.config_description.grid(row=2, column=0, sticky="new")
+        self.form_area.grid(row=2, column=0, sticky="nsew")
+        self.form_area.grid_columnconfigure(0, weight=1)
+
+        self.config_description = ctk.CTkLabel(
+            self.form_area,
+            text="Select a configuration from the middle panel.\nIts settings and controls will be displayed here.",
+            text_color=("#687386", "#8995A8"), justify="left", anchor="nw",
+            font=ctk.CTkFont(size=13), wraplength=520
+        )
+        self.config_description.pack(fill="x", anchor="w", pady=(2, 16))
+
+        self.inputs_frame = ctk.CTkFrame(self.form_area, fg_color="transparent")
+        self.inputs_frame.pack(fill="x", expand=True)
+        self.inputs_frame.grid_columnconfigure(0, weight=1)
+
+        self.config_execute_button = ctk.CTkButton(
+            self.form_area, text="Execute configuration", height=40,
+            corner_radius=9, command=self._execute_selected_config
+        )
+        self.config_execute_button.pack(fill="x", pady=(14, 12))
+        self.config_execute_button.pack_forget()
 
         # Command terminal remains available at the bottom of the right panel.
         terminal = ctk.CTkFrame(self.config_panel, corner_radius=12, border_width=1, height=245)
@@ -476,11 +529,132 @@ class WorkspaceView(ctk.CTkFrame):
             f"{payload['info']}\n\nReady for commands.\n"
         )
         self.config_title.configure(text=f"{payload.get('brand', 'Device')} workspace")
-        self.config_description.configure(
-            text="The device-specific option list is intentionally empty for now.\n"
-                 "We'll decide how options and their configuration forms work next."
-        )
+        self.current_vendor = payload.get("brand", "").strip()
+        self._load_vendor_configs()
         self.command_entry.focus_set()
+
+    def _clear_options(self):
+        for widget in self.options_list.winfo_children():
+            widget.destroy()
+
+    def _load_vendor_configs(self):
+        self._clear_options()
+        try:
+            configs = self.config_manager.get_configs(self.current_vendor)
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            configs = []
+            self.empty_options = ctk.CTkLabel(
+                self.options_list, text=f"Could not load configurations:\n{exc}",
+                justify="left", anchor="w", wraplength=175,
+                text_color=("#B42318", "#FF8B82")
+            )
+            self.empty_options.pack(fill="x", padx=8, pady=12)
+            return
+
+        if not configs:
+            self.empty_options = ctk.CTkLabel(
+                self.options_list, text=f"No configurations found for {self.current_vendor}.",
+                justify="left", anchor="w", wraplength=175,
+                text_color=("#687386", "#8995A8")
+            )
+            self.empty_options.pack(fill="x", padx=8, pady=12)
+            return
+
+        for item in configs:
+            button = ctk.CTkButton(
+                self.options_list, text=item.get("name", item["id"]),
+                anchor="w", height=38, corner_radius=8,
+                fg_color="transparent", border_width=1,
+                text_color=("#202938", "#E7ECF5"),
+                command=lambda config_id=item["id"]: self._select_config(config_id)
+            )
+            button.pack(fill="x", padx=4, pady=4)
+
+    def _clear_form(self):
+        for widget in self.inputs_frame.winfo_children():
+            widget.destroy()
+        self.input_widgets.clear()
+        self.config_execute_button.pack_forget()
+
+    def _select_config(self, config_id):
+        try:
+            config = self.config_manager.load_config(self.current_vendor, config_id)
+        except (FileNotFoundError, ValueError, OSError) as exc:
+            messagebox.showerror("Configuration error", str(exc), parent=self)
+            return
+
+        self.selected_config = config
+        self._clear_form()
+        self.config_title.configure(text=config.get("name", config_id))
+        self.config_description.configure(
+            text=config.get("description", "No description available."),
+            wraplength=520
+        )
+
+        for row, field in enumerate(config.get("inputs", [])):
+            name = field["name"]
+            label = field.get("label", name.replace("_", " ").title())
+            required = field.get("required", True)
+            label_text = f"{label}{' *' if required else ''}"
+
+            ctk.CTkLabel(
+                self.inputs_frame, text=label_text, anchor="w",
+                font=ctk.CTkFont(size=12, weight="bold")
+            ).grid(row=row * 2, column=0, sticky="w", padx=2, pady=(10, 4))
+
+            choices = field.get("choices")
+            default = field.get("default")
+            if choices:
+                widget = ctk.CTkOptionMenu(
+                    self.inputs_frame, values=[str(choice) for choice in choices],
+                    height=36, corner_radius=8
+                )
+                if default is not None:
+                    widget.set(str(default))
+            else:
+                placeholder = f"Enter {label.lower()}"
+                if field.get("type") == "integer":
+                    placeholder = "Enter a number"
+                widget = ctk.CTkEntry(
+                    self.inputs_frame, height=36, corner_radius=8,
+                    placeholder_text=placeholder
+                )
+                if default is not None:
+                    widget.insert(0, str(default))
+
+            widget.grid(row=row * 2 + 1, column=0, sticky="ew", padx=2, pady=(0, 3))
+            self.input_widgets[name] = widget
+
+        self.config_execute_button.pack(fill="x", pady=(16, 12))
+
+    def _execute_selected_config(self):
+        if not self.selected_config:
+            return
+
+        values = {}
+        for name, widget in self.input_widgets.items():
+            if isinstance(widget, ctk.CTkOptionMenu):
+                values[name] = widget.get()
+            else:
+                values[name] = widget.get().strip()
+
+        try:
+            commands = self.config_manager.build_commands(self.selected_config, values)
+            if not commands:
+                raise ValueError("This configuration does not contain any commands.")
+        except (KeyError, TypeError, ValueError) as exc:
+            messagebox.showerror("Invalid input", str(exc), parent=self)
+            return
+
+        preview = "\n".join(commands)
+        confirmed = messagebox.askyesno(
+            "Confirm configuration",
+            "The following commands will be sent to the connected device:\n\n"
+            f"{preview}\n\nDo you want to continue?",
+            parent=self
+        )
+        if confirmed:
+            self.on_execute_config(commands)
 
     def _submit_command(self):
         command = self.command_entry.get().strip()
@@ -502,6 +676,10 @@ class WorkspaceView(ctk.CTkFrame):
             state="disabled" if busy else "normal",
             text="…" if busy else "Run"
         )
+        self.config_execute_button.configure(
+            state="disabled" if busy else "normal",
+            text="Executing…" if busy else "Execute configuration"
+        )
 
     def clear_terminal(self):
         self.output.configure(state="normal")
@@ -517,9 +695,19 @@ class WorkspaceView(ctk.CTkFrame):
         self.model_value.configure(text="—")
         self.config_title.configure(text="Choose a configuration")
         self.config_description.configure(
-            text="Select a device tool from the middle panel.\n"
+            text="Select a configuration from the middle panel.\n"
                  "Its settings and controls will be displayed here."
         )
+        self.current_vendor = ""
+        self.selected_config = None
+        self._clear_form()
+        self._clear_options()
+        self.empty_options = ctk.CTkLabel(
+            self.options_list, text="Connect to a supported device\nto load its configurations.",
+            justify="left", anchor="w", wraplength=175,
+            text_color=("#687386", "#8995A8")
+        )
+        self.empty_options.pack(fill="x", padx=8, pady=12)
 
     def focus_command(self):
         self.command_entry.focus_set()

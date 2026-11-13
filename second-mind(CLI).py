@@ -1,12 +1,12 @@
-import Connection
+import utils.Connection
 import os
 import time
 from pyfiglet import Figlet
 
 
-SSHClient = Connection.SSH()
-TelnetClient = Connection.Telnet()
-SerialClient = Connection.Serial()
+SSHClient = utils.Connection.SSH()
+TelnetClient = utils.Connection.Telnet()
+SerialClient = utils.Connection.Serial()
 
 
 text = Figlet(font='slant')
@@ -54,6 +54,7 @@ def RunApp():
                 else:
                     SSHClient.close()
                     app_key = False
+                    break
             elif connection:
                 SSHMenu()
         elif ConnectionType == '2':
@@ -80,7 +81,7 @@ def SSHMenu():
     os.system("cls")
     print(text)
     print("-"*30)
-    connection_info = Connection.device_information(SSHClient, 'SSH')
+    connection_info = utils.Connection.device_information(SSHClient, 'SSH')
     try:
         if "Mikrotik" in connection_info:
             print(SSHClient.command("interface/print"))  # print all interfaces
@@ -114,18 +115,19 @@ def SSHMenu():
                             "--------------------")
                         while True:
                             command = input('>>>')  # input command
-                            output = Connection.SSH.command(command=command)
+                            output = utils.Connection.SSH.command(command=command)
                             if command == '0':  # if the user enter 0, the command line will be closed
                                 SSHClient.close()
                             else:
                                 print(output)
+                                time.sleep(2)
                     elif command == 2:  # If user selects 2,the default config will be reset
                         os.system("cls")
                         print(text)
                         print('RESETTING SYSTEM CONFIGURATION\n'
                             '--------------------')
-                        Connection.SSH.command("system/reset-configuration no-defaults=yes")  # reset the default config
-                        Connection.SSH.command("y")
+                        utils.Connection.SSH.command("system/reset-configuration no-defaults=yes")  # reset the default config
+                        utils.Connection.SSH.command("y")
                         print("wait few seconds")
                         time.sleep(7)
                         SSHMenu()

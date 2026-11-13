@@ -1,0 +1,20 @@
+
+{
+    "id": "set_identity",
+    "name": "Set System Identity",
+    "description": "Change the system identity",
+
+    "inputs": [
+        {
+            "name": "Identity",
+            "label": "Identity",
+            "type": "string",
+            "required": true,
+            "pattern": "[a-zA-Z0-9_-]+"
+        }
+    ],
+
+    "commands": [
+        "system/identity/set name={Identity}"
+    ]
+}

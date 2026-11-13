@@ -1,0 +1,13 @@
+
+{
+    "id": "reset_default_configuration",
+    "name": "Reset Default Configuration",
+    "description": "Reset the default configuration of the device",
+
+    "inputs": [
+    ],
+
+    "commands": [
+        "system/reset-configuration no-defaults=yes"
+    ]
+}
