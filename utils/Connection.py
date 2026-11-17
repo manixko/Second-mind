@@ -3,7 +3,7 @@ import re
 import time
 import paramiko
 import serial
-import telnetlib
+from telnetlib3.sync import TelnetConnection
 
 
 class SSH:
@@ -53,44 +53,180 @@ class SSH:
 
 
 class Telnet:
+    """Synchronous Telnet client compatible with the existing Second Mind API."""
+
+    LOGIN_TIMEOUT = 12
+    COMMAND_TIMEOUT = 20
+    READ_INTERVAL = 0.4
+    IDLE_TIMEOUT = 1.0
+
     def __init__(self):
-        self.client = telnetlib.Telnet()
+        self.client = None
         self.hostname = None
         self.port = None
         self.username = None
         self.password = None
+        self.prompt = None
+
+    @staticmethod
+    def _is_username_prompt(text):
+        return bool(re.search(r"(?:login|username)\s*:\s*$", text, re.IGNORECASE))
+
+    @staticmethod
+    def _is_password_prompt(text):
+        return bool(re.search(r"password\s*:\s*$", text, re.IGNORECASE))
+
+    @staticmethod
+    def _is_device_prompt(text):
+        # Cisco: Router>, Router# | MikroTik: [admin@MikroTik] >
+        lines = [line.strip() for line in text.replace("\r", "").split("\n") if line.strip()]
+        if not lines:
+            return False
+        last_line = lines[-1]
+        return bool(
+            re.search(r"\[[^\]]+\]\s*[>#]\s*$", last_line)
+            or re.search(r"[A-Za-z0-9_.()/-]+[>#]\s*$", last_line)
+        )
+
+    @staticmethod
+    def _has_auth_error(text):
+        return bool(re.search(
+            r"(login incorrect|authentication failed|access denied|invalid username|invalid password|%\s*login invalid)",
+            text,
+            re.IGNORECASE,
+        ))
+
+    def _read_some(self, timeout=None):
+        """Read one available Telnet chunk; a timeout simply means no new data."""
+        try:
+            return self.client.read_some(timeout=timeout or self.READ_INTERVAL)
+        except TimeoutError:
+            return ""
+
+    def _read_until_login_state(self, timeout):
+        """Read until a username prompt, password prompt, or device prompt appears."""
+        collected = ""
+        deadline = time.monotonic() + timeout
+
+        while time.monotonic() < deadline:
+            chunk = self._read_some(min(self.READ_INTERVAL, max(0.1, deadline - time.monotonic())))
+            if chunk:
+                if isinstance(chunk, bytes):
+                    chunk = chunk.decode("utf-8", errors="replace")
+                collected += chunk
+
+                if self._has_auth_error(collected):
+                    raise PermissionError("Telnet authentication failed: device rejected the credentials.")
+                if self._is_username_prompt(collected):
+                    return "username", collected
+                if self._is_password_prompt(collected):
+                    return "password", collected
+                if self._is_device_prompt(collected):
+                    return "prompt", collected
+
+        return None, collected
 
     def connect(self, hostname, port, username, password=None):
         self.hostname = hostname
-        self.port = port
-        self.username = username
-        self.password = password
+        self.port = int(port)
+        self.username = username or ""
+        self.password = password or ""
+        self.prompt = None
+
         try:
-            self.client.open(self.hostname, self.port)
-            self.client.read_until(b"login: ")
-            self.client.write(self.username.encode('ascii') + b"\n")
-            if self.password:
-                self.client.read_until(b"Password: ")
-                self.client.write(self.password.encode('ascii') + b"\n")
-            print("Telnet connection established successfully!")
-            return True
+            self.client = TelnetConnection(
+                self.hostname,
+                self.port,
+                timeout=2,
+                connect_timeout=10,
+                encoding="utf8",
+            )
+            self.client.connect()
+
+            # Some devices show the login prompt immediately; others wait for Enter.
+            state, response = self._read_until_login_state(3)
+            if state is None:
+                self.client.write("\r\n")
+                state, response = self._read_until_login_state(self.LOGIN_TIMEOUT)
+
+            # Handle username/password prompts in either order. This covers common
+            # RouterOS and Cisco VTY login sequences without assuming exact casing.
+            for _ in range(4):
+                if state == "username":
+                    self.client.write(self.username + "\r\n")
+                    state, response = self._read_until_login_state(self.LOGIN_TIMEOUT)
+                elif state == "password":
+                    self.client.write(self.password + "\r\n")
+                    state, response = self._read_until_login_state(self.LOGIN_TIMEOUT)
+                elif state == "prompt":
+                    self.prompt = response.splitlines()[-1].strip()
+                    print("Telnet connection established successfully!")
+                    return True
+                else:
+                    break
+
+            if self._has_auth_error(response):
+                raise PermissionError("Telnet authentication failed: device rejected the credentials.")
+            raise TimeoutError(
+                "Could not detect a Telnet login prompt or device command prompt. "
+                "Check the device's Telnet service and login configuration."
+            )
+
         except Exception as e:
             print(f"Failed to establish Telnet connection: {e}")
+            if self.client:
+                try:
+                    self.client.close()
+                except Exception:
+                    pass
+                self.client = None
             return False
 
     def command(self, command):
+        if not self.client:
+            print("Error executing command over Telnet: not connected.")
+            return ""
+
         try:
-            self.client.write(command.encode('ascii') + b"\n")
-            time.sleep(1)
-            output = self.client.read_very_eager().decode('ascii')
+            # Discard any leftover bytes from the previous command.
+            while self._read_some(0.05):
+                pass
+
+            self.client.write(str(command) + "\r\n")
+            self.client.flush(timeout=2)
+
+            output = ""
+            deadline = time.monotonic() + self.COMMAND_TIMEOUT
+            last_data_time = None
+
+            while time.monotonic() < deadline:
+                chunk = self._read_some(self.READ_INTERVAL)
+                if chunk:
+                    if isinstance(chunk, bytes):
+                        chunk = chunk.decode("utf-8", errors="replace")
+                    output += chunk
+                    last_data_time = time.monotonic()
+
+                    # A returned command prompt marks the end of normal CLI output.
+                    if self._is_device_prompt(output):
+                        break
+                elif output and last_data_time is not None:
+                    if time.monotonic() - last_data_time >= self.IDLE_TIMEOUT:
+                        break
+
             return output.strip()
+
         except Exception as e:
             print(f"Error executing command over Telnet: {e}")
             return ""
 
     def close(self):
-        self.client.close()
-        print("Telnet connection closed.")
+        if self.client:
+            try:
+                self.client.close()
+            finally:
+                self.client = None
+                print("Telnet connection closed.")
 
 
 # Console (Serial) Class

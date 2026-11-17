@@ -16,7 +16,7 @@ except ImportError:
 try:
     from utils.config_manager import ConfigManager
 except ImportError:
-    from config_manager import ConfigManager
+    from utils.config_manager import ConfigManager
 
 ctk.set_default_color_theme("blue")
 ctk.set_appearance_mode("dark")
