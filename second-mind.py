@@ -344,6 +344,8 @@ class WorkspaceView(ctk.CTkFrame):
         self.current_vendor = ""
         self.selected_config = None
         self.input_widgets = {}
+        self.device_client = None
+        self.interfaces = []
 
         # Main layout: device sidebar | dynamic option list | selected option panel
         self.grid_rowconfigure(0, weight=1)
@@ -518,6 +520,8 @@ class WorkspaceView(ctk.CTkFrame):
         setattr(self, attribute, value)
 
     def load(self, payload):
+        self.device_client = payload.get("client")
+        self.interfaces = []
         self.device_name_label.configure(text=payload.get("brand", "Unknown"))
         self.connection_value.configure(text=payload["protocol"])
         self.username_value.configure(text=payload.get("username", "—"))
@@ -576,6 +580,59 @@ class WorkspaceView(ctk.CTkFrame):
         self.input_widgets.clear()
         self.config_execute_button.pack_forget()
 
+    def _get_device_interfaces(self):
+        """Read interface names from the connected device."""
+        if self.interfaces:
+            return self.interfaces
+
+        if not self.device_client:
+            return []
+
+        vendor = self.current_vendor.lower()
+        try:
+            if "mikrotik" in vendor:
+                # RouterOS terse output contains name=<interface> fields.
+                output = self.device_client.command("/interface/print terse") or ""
+                names = re.findall(r"(?:^|\s)name=([^\s]+)", str(output), re.MULTILINE)
+
+                # Fallback for devices/versions that do not return terse output.
+                if not names:
+                    output = self.device_client.command("/interface/print") or ""
+                    for line in str(output).splitlines():
+                        match = re.match(r"^\s*\d+\s+(?:[A-Z]+\s+)?([^\s]+)\s+", line)
+                        if match:
+                            names.append(match.group(1))
+
+            elif "cisco" in vendor:
+                output = self.device_client.command("show interfaces status") or ""
+                names = []
+                for line in str(output).splitlines():
+                    line = line.strip()
+                    if not line or line.lower().startswith(("port ", "----")):
+                        continue
+                    first = line.split()[0]
+                    if re.match(
+                        r"^(?:Gi|GigabitEthernet|Fa|FastEthernet|Te|TenGigabitEthernet|"
+                        r"Eth|Ethernet|Po|Port-channel|Hu|HundredGigE)",
+                        first,
+                        re.IGNORECASE,
+                    ):
+                        names.append(first)
+            else:
+                names = []
+
+            # Keep order while removing duplicates and empty values.
+            self.interfaces = list(dict.fromkeys(name.strip() for name in names if name.strip()))
+            return self.interfaces
+
+        except Exception as exc:
+            messagebox.showwarning(
+                "Interface list unavailable",
+                f"Could not retrieve interfaces from the device.\n\n{exc}",
+                parent=self,
+            )
+            return []
+
     def _select_config(self, config_id):
         try:
             config = self.config_manager.load_config(self.current_vendor, config_id)
@@ -604,7 +661,28 @@ class WorkspaceView(ctk.CTkFrame):
 
             choices = field.get("choices")
             default = field.get("default")
-            if choices:
+            field_type = field.get("type")
+
+            if field_type == "interface":
+                interfaces = self._get_device_interfaces()
+                if interfaces:
+                    widget = ctk.CTkOptionMenu(
+                        self.inputs_frame, values=interfaces,
+                        height=36, corner_radius=8
+                    )
+                    if default in interfaces:
+                        widget.set(str(default))
+                else:
+                    widget = ctk.CTkLabel(
+                        self.inputs_frame,
+                        text="No interfaces found. Check device access or command output.",
+                        anchor="w",
+                        text_color=("#B42318", "#FF8B82"),
+                    )
+                    # A label is not a valid input; the validation below prevents execution.
+                    self.input_widgets[name] = widget
+                    continue
+            elif choices:
                 widget = ctk.CTkOptionMenu(
                     self.inputs_frame, values=[str(choice) for choice in choices],
                     height=36, corner_radius=8
@@ -613,7 +691,7 @@ class WorkspaceView(ctk.CTkFrame):
                     widget.set(str(default))
             else:
                 placeholder = f"Enter {label.lower()}"
-                if field.get("type") == "integer":
+                if field_type == "integer":
                     placeholder = "Enter a number"
                 widget = ctk.CTkEntry(
                     self.inputs_frame, height=36, corner_radius=8,
@@ -627,12 +705,30 @@ class WorkspaceView(ctk.CTkFrame):
 
         self.config_execute_button.pack(fill="x", pady=(16, 12))
 
+        # A long form may have been scrolled down. Return to the top whenever
+        # a new configuration is selected so short forms are immediately visible.
+        self.after_idle(self._scroll_form_to_top)
+
+    def _scroll_form_to_top(self):
+        try:
+            self.update_idletasks()
+            self.form_area._parent_canvas.yview_moveto(0)
+        except (AttributeError, tk.TclError):
+            pass
+
     def _execute_selected_config(self):
         if not self.selected_config:
             return
 
         values = {}
         for name, widget in self.input_widgets.items():
+            if isinstance(widget, ctk.CTkLabel):
+                messagebox.showwarning(
+                    "Missing interface",
+                    "The interface list is unavailable. Refresh the connection or check device permissions.",
+                    parent=self,
+                )
+                return
             if isinstance(widget, ctk.CTkOptionMenu):
                 values[name] = widget.get()
             else:
