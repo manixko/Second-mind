@@ -1,0 +1,30 @@
+{
+    "id": "configure_static_route",
+    "name": "Configure Static Route",
+    "description": "Add an IPv4 static route to a destination network through a next-hop address.",
+    "inputs": [
+        {
+            "name": "destination_network",
+            "label": "Destination Network",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "subnet_mask",
+            "label": "Subnet Mask",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "next_hop",
+            "label": "Next Hop",
+            "type": "string",
+            "required": true
+        }
+    ],
+    "commands": [
+        "configure terminal",
+        "ip route {destination_network} {subnet_mask} {next_hop}",
+        "end"
+    ]
+}

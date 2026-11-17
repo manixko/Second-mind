@@ -1,0 +1,25 @@
+{
+    "id": "configure_allowed_vlans",
+    "name": "Configure Allowed VLANs",
+    "description": "Set the VLAN IDs permitted on a trunk interface (for example: 10,20,30 or 10-20).",
+    "inputs": [
+        {
+            "name": "interface",
+            "label": "Trunk Interface",
+            "type": "interface",
+            "required": true
+        },
+        {
+            "name": "allowed_vlans",
+            "label": "Allowed VLANs",
+            "type": "string",
+            "required": true
+        }
+    ],
+    "commands": [
+        "configure terminal",
+        "interface {interface}",
+        "switchport trunk allowed vlan {allowed_vlans}",
+        "end"
+    ]
+}

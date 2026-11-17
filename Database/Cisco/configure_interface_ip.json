@@ -1,0 +1,32 @@
+{
+    "id": "configure_interface_ip",
+    "name": "Configure Interface IP",
+    "description": "Assign an IPv4 address and subnet mask to a Layer 3 interface.",
+    "inputs": [
+        {
+            "name": "interface",
+            "label": "Interface",
+            "type": "interface",
+            "required": true
+        },
+        {
+            "name": "ip_address",
+            "label": "IP Address",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "subnet_mask",
+            "label": "Subnet Mask",
+            "type": "string",
+            "required": true
+        }
+    ],
+    "commands": [
+        "configure terminal",
+        "interface {interface}",
+        "ip address {ip_address} {subnet_mask}",
+        "no shutdown",
+        "end"
+    ]
+}

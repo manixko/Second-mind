@@ -1,0 +1,17 @@
+{
+    "id": "configure_default_route",
+    "name": "Configure Default Route",
+    "inputs": [
+        {
+            "name": "next_hop",
+            "label": "Next Hop",
+            "type": "string",
+            "required": true
+        }
+    ],
+    "commands": [
+        "configure terminal",
+        "ip route 0.0.0.0 0.0.0.0 {next_hop}",
+        "end"
+    ]
+}

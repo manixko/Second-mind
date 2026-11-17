@@ -1,0 +1,20 @@
+{
+    "id": "configure_trunk_port",
+    "name": "Configure Trunk Port",
+    "description": "Configure a switch interface as an IEEE 802.1Q trunk.",
+    "inputs": [
+        {
+            "name": "interface",
+            "label": "Interface",
+            "type": "interface",
+            "required": true
+        }
+    ],
+    "commands": [
+        "configure terminal",
+        "interface {interface}",
+        "switchport mode trunk",
+        "no shutdown",
+        "end"
+    ]
+}

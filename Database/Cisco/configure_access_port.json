@@ -1,0 +1,29 @@
+{
+    "id": "configure_access_port",
+    "name": "Configure Access Port",
+    "description": "Configure a switch interface as an access port and assign it to a VLAN.",
+    "inputs": [
+        {
+            "name": "interface",
+            "label": "Interface",
+            "type": "interface",
+            "required": true
+        },
+        {
+            "name": "vlan_id",
+            "label": "VLAN ID",
+            "type": "integer",
+            "required": true,
+            "min": 1,
+            "max": 4094
+        }
+    ],
+    "commands": [
+        "configure terminal",
+        "interface {interface}",
+        "switchport mode access",
+        "switchport access vlan {vlan_id}",
+        "no shutdown",
+        "end"
+    ]
+}

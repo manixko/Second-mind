@@ -1,0 +1,42 @@
+{
+    "id": "configure_etherchannel",
+    "name": "Configure EtherChannel",
+    "inputs": [
+        {
+            "name": "interfaces",
+            "label": "Interface Range",
+            "type": "string",
+            "required": true
+        },
+        {
+            "name": "group_id",
+            "label": "Channel Group ID",
+            "type": "integer",
+            "required": true,
+            "min": 1,
+            "max": 48
+        },
+        {
+            "name": "mode",
+            "label": "Mode",
+            "type": "string",
+            "required": true,
+            "choices": [
+                "active",
+                "passive",
+                "desirable",
+                "auto",
+                "on"
+            ]
+        }
+    ],
+    "commands": [
+        "configure terminal",
+        "interface range {interfaces}",
+        "channel-group {group_id} mode {mode}",
+        "exit",
+        "interface port-channel {group_id}",
+        "no shutdown",
+        "end"
+    ]
+}

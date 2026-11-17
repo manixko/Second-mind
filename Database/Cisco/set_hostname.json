@@ -1,0 +1,18 @@
+{
+    "id": "set_hostname",
+    "name": "Set Hostname",
+    "description": "Set the device hostname.",
+    "inputs": [
+        {
+            "name": "hostname",
+            "label": "Hostname",
+            "type": "string",
+            "required": true
+        }
+    ],
+    "commands": [
+        "configure terminal",
+        "hostname {hostname}",
+        "end"
+    ]
+}
