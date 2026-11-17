@@ -1,0 +1,31 @@
+
+{
+    "id": "dns",
+    "name": "DNS Configuration",
+    "description": "Configure DNS servers and remote DNS requests",
+
+    "inputs": [
+        {
+            "name": "dns_servers",
+            "label": "DNS Servers",
+            "type": "string",
+            "required": true,
+            "default": "1.1.1.1,8.8.8.8"
+        },
+        {
+            "name": "allow_remote",
+            "label": "Allow Remote Requests",
+            "type": "string",
+            "required": true,
+            "choices": [
+                "yes",
+                "no"
+            ],
+            "default": "yes"
+        }
+    ],
+
+    "commands": [
+        "/ip dns set servers={dns_servers} allow-remote-requests={allow_remote}"
+    ]
+}

@@ -1,0 +1,71 @@
+
+{
+    "id": "dhcp_server",
+    "name": "DHCP Server",
+    "description": "Configure a DHCP Server with IP pool and network settings",
+
+    "inputs": [
+        {
+            "name": "interface",
+            "label": "Interface",
+            "type": "interface",
+            "required": true
+        },
+        {
+            "name": "server_name",
+            "label": "DHCP Server Name",
+            "type": "string",
+            "required": true,
+            "default": "dhcp1"
+        },
+        {
+            "name": "router_ip",
+            "label": "Router IP Address (CIDR)",
+            "type": "string",
+            "required": true,
+            "default": "192.168.88.1/24"
+        },
+        {
+            "name": "network",
+            "label": "Network Address",
+            "type": "string",
+            "required": true,
+            "default": "192.168.88.0/24"
+        },
+        {
+            "name": "pool_name",
+            "label": "IP Pool Name",
+            "type": "string",
+            "required": true,
+            "default": "dhcp_pool"
+        },
+        {
+            "name": "pool_start",
+            "label": "Pool Start IP",
+            "type": "string",
+            "required": true,
+            "default": "192.168.88.10"
+        },
+        {
+            "name": "pool_end",
+            "label": "Pool End IP",
+            "type": "string",
+            "required": true,
+            "default": "192.168.88.254"
+        },
+        {
+            "name": "gateway",
+            "label": "Gateway",
+            "type": "string",
+            "required": true,
+            "default": "192.168.88.1"
+        }
+    ],
+
+    "commands": [
+        "/ip address add address={router_ip} interface={interface}",
+        "/ip pool add name={pool_name} ranges={pool_start}-{pool_end}",
+        "/ip dhcp-server network add address={network} gateway={gateway}",
+        "/ip dhcp-server add name={server_name} interface={interface} address-pool={pool_name} disabled=no"
+    ]
+}

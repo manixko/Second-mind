@@ -1,0 +1,19 @@
+
+{
+    "id": "dhcp_client",
+    "name": "DHCP Client",
+    "description": "Configure a DHCP Client on an interface",
+
+    "inputs": [
+        {
+            "name": "interface",
+            "label": "Interface",
+            "type": "interface",
+            "required": true
+        }
+    ],
+
+    "commands": [
+        "/ip dhcp-client add interface={interface} disabled=no"
+    ]
+}
